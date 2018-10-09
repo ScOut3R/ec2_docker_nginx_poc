@@ -1,0 +1,28 @@
+---
+- name: Test stack
+  hosts: localhost
+  connection: local
+
+
+  vars:
+    region: ap-southeast-2
+    stack_name: Nginx
+
+
+  tasks:
+    - name: get facts
+      cloudformation_facts:
+        stack_name: "{{ stack_name }}-Webserver"
+        region: "{{ region }}"
+      register: webserver
+
+    - name: set facts
+      set_fact:
+        webserver_ip: "{{ webserver.ansible_facts.cloudformation[stack_name + '-Webserver'].stack_outputs['IP'] }}"
+
+    - name: run tests
+      command: ./test.sh "{{ webserver_ip }}"
+      register: result
+
+    - debug:
+        msg: "{{ result.stdout }}"

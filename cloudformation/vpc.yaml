@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VPCCidr:
+    Type: Number
+    Default: 10
+    MinValue: 10
+    MaxValue: 250
+    Description: VPC unique network range identifier; 10.X.0.0/16
+
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Join ['', ['10.', !Ref VPCCidr, '.0.0/16']]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-vpc']]
+
+  IGW:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-gateway']]
+
+  VPCIGW:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref VPC
+
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-public-route-table']]
+
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref IGW
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetA:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: !Join ['', ['10.', !Ref VPCCidr, '.110.0/24']]
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-public-subnet-A']]
+
+  PublicSubnetARouteTable:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetB:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: !Join ['', ['10.', !Ref VPCCidr, '.120.0/24']]
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs '']
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-public-subnet-B']]
+
+  PublicSubnetBRouteTable:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  PublicSubnetC:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: !Join ['', ['10.', !Ref VPCCidr, '.130.0/24']]
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [2, !GetAZs '']
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-public-subnet-C']]
+
+  PublicSubnetCRouteTable:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetC
+
+Outputs:
+  VPCId:
+    Value: !Ref VPC
+    Export:
+      Name: VPC
+  Cidr:
+    Value: !GetAtt ['VPC', 'CidrBlock']
+    Export:
+      Name: VPCCidrBlock
+  PublicSubnetA:
+    Value: !Ref PublicSubnetA
+    Export:
+      Name: PublicSubnetA
+  PublicSubnetB:
+    Value: !Ref PublicSubnetB
+    Export:
+      Name: PublicSubnetB
+  PublicSubnetC:
+    Value: !Ref PublicSubnetC
+    Export:
+      Name: PublicSubnetC

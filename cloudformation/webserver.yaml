@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  AMIId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+
+  Subnet:
+    Type: 'AWS::EC2::Subnet::Id'
+
+Resources:
+  Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceInitiatedShutdownBehavior: 'stop'
+      InstanceType: t2.micro
+      SubnetId: !Ref Subnet
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      Tags:
+        - Key: 'Name'
+          Value: !Join ['', [!Ref 'AWS::StackName', '-web-server']]
+        - Key: 'costing_group'
+          Value: 'test'
+        - Key: 'Role'
+          Value: 'Webserver'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum -y update
+          mkdir /usr/src/agent
+          cd /usr/src/agent
+          wget https://s3.amazonaws.com/amazoncloudwatch-agent/linux/amd64/latest/AmazonCloudWatchAgent.zip
+          unzip AmazonCloudWatchAgent.zip
+          rpm -Uvh amazon-cloudwatch-agent.rpm
+          cd /
+          rm -rf /usr/src/agent
+          initctl start amazon-cloudwatch-agent
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource Instance --configsets config --region ${AWS::Region}
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource Instance --region ${AWS::Region}
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - 'config'
+        config:
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackName}
+                region=${AWS::Region}
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.Instance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource Instance --configsets config --region ${AWS::Region}
+                runas=root
+            /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json:
+              content: !Sub |
+                {
+                  "agent": {
+                    "metrics_collection_interval": 10,
+                    "region": "${AWS::Region}",
+                    "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+                  },
+                  "metrics": {
+                    "metrics_collected": {
+                      "mem": {
+                        "measurement": [
+                          "used_percent"
+                        ]
+                      },
+                      "disk": {
+                        "measurement": [
+                          "used_percent",
+                          "inodes_free"
+                        ]
+                      }
+                    }
+                  }
+                }
+          commands:
+            restart-amazon-cloudwatch-agent:
+              command: |
+                initctl restart amazon-cloudwatch-agent
+
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Web server security group
+      VpcId: !ImportValue VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: '0.0.0.0/0'
+          FromPort: 80
+          ToPort: 80
+
+  EC2Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          -
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+                - 'ssm.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        -
+          PolicyName: 'SSMPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              -
+                Effect: 'Allow'
+                Action:
+                  - 'ec2messages:*'
+                  - 'ssm:UpdateInstanceInformation'
+                  - 'ssm:DescribeAssociation'
+                  - 'ssm:GetDocument'
+                  - 'ssm:ListAssociations'
+                  - 'ssm:ListInstanceAssociations'
+                  - 'ssm:UpdateAssociationStatus'
+                  - 'ssm:GetDeployablePatchSnapshotForInstance'
+                  - 'ssm:PutInventory'
+                  - 'ssmmessages:CreateControlChannel'
+                  - 'ssmmessages:CreateDataChannel'
+                  - 'ssmmessages:OpenControlChannel'
+                  - 'ssmmessages:OpenDataChannel'
+                  - 's3:GetEncryptionConfiguration'
+                Resource: '*'
+        -
+          PolicyName: 'CloudWatchPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              -
+                Effect: 'Allow'
+                Action:
+                  - 'ec2:DescribeTags'
+                  - 'cloudwatch:PutMetricData'
+                  - 'cloudwatch:GetMetricStatistics'
+                  - 'cloudwatch:ListMetrics'
+                Resource: '*'
+
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  EIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: 'vpc'
+
+  EIPAssociation:
+    Type: 'AWS::EC2::EIPAssociation'
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      InstanceId: !Ref Instance
+
+Outputs:
+  IP:
+    Value: !Ref EIP

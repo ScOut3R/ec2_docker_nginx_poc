@@ -1,0 +1,53 @@
+---
+- name: Deploy stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+
+  vars:
+    region: ap-southeast-2
+    ami_id: /aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2
+    network: 10
+    stack_name: Nginx
+
+
+  tasks:
+
+    - name: VPC
+      cloudformation:
+        stack_name: "{{ stack_name }}-VPC"
+        state: present
+        region: "{{ region }}"
+        template: cloudformation/vpc.yaml
+        template_parameters:
+          VPCCidr: "{{ network }}"
+
+    - name: get facts
+      cloudformation_facts:
+        stack_name: "{{ stack_name }}-VPC"
+        region: "{{ region }}"
+      register: vpc
+
+    - name: set facts
+      set_fact:
+        subnet_a: "{{ vpc.ansible_facts.cloudformation[stack_name + '-VPC'].stack_outputs['PublicSubnetA'] }}"
+        subnet_b: "{{ vpc.ansible_facts.cloudformation[stack_name + '-VPC'].stack_outputs['PublicSubnetB'] }}"
+        subnet_c: "{{ vpc.ansible_facts.cloudformation[stack_name + '-VPC'].stack_outputs['PublicSubnetC'] }}"
+
+    - name: SSM
+      cloudformation:
+        stack_name: "{{ stack_name }}-SSM"
+        state: present
+        region: "{{ region }}"
+        template: cloudformation/ssm.yaml
+
+    - name: Webserver
+      cloudformation:
+        stack_name: "{{ stack_name }}-Webserver"
+        state: present
+        region: "{{ region }}"
+        template: cloudformation/webserver.yaml
+        template_parameters:
+          AMIId: "{{ ami_id }}"
+          Subnet: "{{ subnet_a }}"

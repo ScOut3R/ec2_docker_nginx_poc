@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  StateDocument:
+    Type: 'AWS::SSM::Document'
+    Properties:
+      DocumentType: Command
+      Content:
+        schemaVersion: '2.2'
+        mainSteps:
+          -
+            name: InstallAnsible
+            action: aws:runShellScript
+            inputs:
+              runCommand:
+                - yum -y install python27-pip
+                - pip install ansible
+          -
+            name: RunAnsiblePlaybook
+            action: aws:runDocument
+            inputs:
+              documentType: SSMDocument
+              documentPath: AWS-RunAnsiblePlaybook
+              documentParameters:
+                playbook: |
+                  ---
+                  - hosts: localhost
+
+                    tasks:
+                      - name: Configure Firewall
+                        block:
+                          - iptables:
+                              chain: INPUT
+                              ctstate: ESTABLISHED,RELATED
+                              jump: ACCEPT
+                          - iptables:
+                              chain: INPUT
+                              protocol: tcp
+                              destination_port: 80
+                              ctstate: NEW
+                              syn: match
+                              jump: ACCEPT
+
+                      - name: Configure Docker
+                        block:
+                          - package:
+                              name: docker
+                              state: present
+                          - service:
+                              name: docker
+                              state: started
+                              enabled: true
+                          - pip:
+                              name: docker-py
+                              state: present
+
+                      - name: Configure Nginx
+                        docker_container:
+                          name: nginx
+                          image: nginx
+                          state: started
+                          ports:
+                            - '80:80'
+
+  State:
+    Type: 'AWS::SSM::Association'
+    Properties:
+      Name: !Ref StateDocument
+      ScheduleExpression: rate(30 minutes)
+      Targets:
+        -
+          Key: tag:Role
+          Values:
+            - Webserver
